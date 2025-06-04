@@ -45,6 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const openai_1 = __importDefault(require("openai"));
 const dotenv = __importStar(require("dotenv"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -53,13 +54,12 @@ const node_1 = require("./defaults/node");
 const react_1 = require("./defaults/react");
 // Load environment variables
 dotenv.config();
-const API_KEY = process.env.GOOGLE_GENAI_API_KEY || "your-api-key-here";
-const BASE_URL = "https://genai.googleapis.com";
-const { GoogleGenAI } = require("@google/genai");
+const API_KEY = process.env.CLAUDE_API_KEY || "your-api-key-here";
+const BASE_URL = "https://models.inference.ai.azure.com";
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
 app.use((0, cors_1.default)());
-const client = new GoogleGenAI({
+const client = new openai_1.default({
     apiKey: API_KEY,
     baseURL: BASE_URL,
 });
@@ -71,20 +71,23 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(400).json({ message: "❌ Prompt is required" });
             return;
         }
+        // 🔹 STRICT SYSTEM PROMPT: Ensures AI only returns JSON
         const systemPrompt = `
         You are a JSON response generator. Your task is to return ONLY a JSON object in this format:
   { "projectType": "react" } or { "projectType": "node" }.
   Do NOT include any explanations, code, or extra text. Your response must be valid JSON.
     `;
         const response = yield client.chat.completions.create({
-            model: "genai-model",
+            model: "gpt-4o",
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: prompt },
             ],
             max_tokens: 8000,
-            response_format: { type: "json_object" },
+            response_format: { type: "json_object" }, // 🔹 Ensures structured output
         });
+        // console.log("🟢 Full API Response:", JSON.stringify(response, null, 2));
+        // 🔹 Validate AI response
         const messageContent = (_c = (_b = (_a = response.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content;
         if (!messageContent) {
             console.error("❌ AI returned empty response.");
@@ -93,7 +96,7 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
         }
         let projectType;
         try {
-            const parsedContent = JSON.parse(messageContent);
+            const parsedContent = JSON.parse(messageContent); // 🔹 Ensure valid JSON
             if (!parsedContent.projectType) {
                 throw new Error("Missing 'projectType' in AI response");
             }
@@ -104,11 +107,12 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(400).json({ message: "❌ AI response is not in valid JSON format", rawResponse: response });
             return;
         }
+        // 🔹 Respond based on AI decision
         if (projectType === "react") {
             res.json({
                 prompts: [
                     prompts_1.BASE_PROMPT,
-                    `Here is a react artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${react_1.basePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
+                    `Here is  a react  artifact that contains all files of the project visible to you.\nConsider the contents of ALL files in the project.\n\n${react_1.basePrompt}\n\nHere is a list of files that exist on the file system but are not being shown to you:\n\n  - .gitignore\n  - package-lock.json\n`,
                 ],
                 uiPrompts: [react_1.basePrompt],
             });
@@ -130,6 +134,8 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
         res.status(500).json({ message: "❌ Internal Server Error" });
     }
 }));
+// creating chat endpoint
+// 🔹 Creating chat endpoint
 app.post("/chat", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d;
     try {
@@ -138,21 +144,29 @@ app.post("/chat", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.status(400).json({ message: "❌ Messages array is required and must be non-empty" });
             return;
         }
+        // 🔹 System Prompt for Additional Control
         const systemPrompt = (0, prompts_1.getSystemPrompt)();
+        // 🔹 Ensure messages conform to OpenAI API format
         const chatMessages = [
             { role: "system", content: systemPrompt },
             ...messages
-        ];
+        ]; // ✅ Explicitly set the type
+        // 🔹 Send Request to GPT-4
         const response = yield client.chat.completions.create({
-            model: "genai-model",
-            messages: chatMessages,
+            model: "gpt-4o",
+            messages: chatMessages, // ✅ Ensure proper type
             max_tokens: 8000,
         });
+
+        console.log("🟢 Full AI Response:", JSON.stringify(response, null, 2));
+        
+        // 🔹 Validate AI Response
         const messageContent = (_c = (_b = (_a = response.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content;
         if (!messageContent) {
             res.status(400).json({ message: "❌ AI response is empty" });
             return;
         }
+        // 🔹 Send AI Response
         res.json({ message: messageContent });
     }
     catch (error) {
@@ -160,4 +174,5 @@ app.post("/chat", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         res.status(500).json({ message: "❌ Internal Server Error" });
     }
 }));
+// ✅ Ensure app listens properly
 app.listen(3000, () => console.log("🚀 Server running on port 3000"));

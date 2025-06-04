@@ -1,90 +1,90 @@
 import { Step, StepType } from './types';
 
-/*
- * Parse input XML and convert it into steps.
- * Eg: Input - 
- * <boltArtifact id=\"project-import\" title=\"Project Files\">
- *  <boltAction type=\"file\" filePath=\"eslint.config.js\">
- *      import js from '@eslint/js';\nimport globals from 'globals';\n
- *  </boltAction>
- * <boltAction type="shell">
- *      node index.js
- * </boltAction>
- * </boltArtifact>
- * 
- * Output - 
- * [{
- *      title: "Project Files",
- *      status: "Pending"
- * }, {
- *      title: "Create eslint.config.js",
- *      type: StepType.CreateFile,
- *      code: "import js from '@eslint/js';\nimport globals from 'globals';\n"
- * }, {
- *      title: "Run command",
- *      code: "node index.js",
- *      type: StepType.RunScript
- * }]
- * 
- * The input can have strings in the middle they need to be ignored
- */
-export function parseXml(response: string): Step[] {
-  if (!response || typeof response !== 'string') {
-      return [];
+// Global stepId counter to ensure unique IDs
+let globalStepId = 1;
+
+export function parseXml(response: string | undefined): Step[] {
+  if (!response || typeof response !== 'string' || response.trim() === '') {
+    console.warn('Invalid or empty response:', response);
+    return [{
+      id: globalStepId++,
+      title: 'Error Response',
+      description: 'Received an invalid or empty response',
+      type: StepType.CreateFile,
+      status: 'pending',
+      code: String(response || 'No content'),
+      path: '/error.txt'
+    }];
   }
 
-  // Try to extract XML content - be more permissive with tag matching
-  const xmlMatch = /<boltArtifact[^>]*>([\s\S]*?)<\/boltArtifact>/i.exec(response);
-  const xmlContent = xmlMatch?.[1] || response; // Fallback to using entire response if no tags found
+  // Extract <boltArtifact> section
+  const boltArtifactMatch = /<boltArtifact[^>]*>([\s\S]*?)<\/boltArtifact>/i.exec(response);
+  const xmlContent = boltArtifactMatch ? boltArtifactMatch[0] : response; // Use full match to include tags
+  console.log('Extracted XML Content:', xmlContent);
 
   const steps: Step[] = [];
-  let stepId = 1;
 
-  // Extract artifact title with fallback
+  // Extract artifact title
   const titleMatch = /title="([^"]*)"/i.exec(response);
   const artifactTitle = titleMatch?.[1] || 'Project Files';
 
   // Add initial artifact step
   steps.push({
-      id: stepId++,
-      title: artifactTitle,
-      description: '',
-      type: StepType.CreateFolder,
-      status: 'pending'
+    id: globalStepId++,
+    title: artifactTitle,
+    description: '',
+    type: StepType.CreateFolder,
+    status: 'pending'
   });
 
-  // More resilient action parsing
-  const actionRegex = /<boltAction\s+type="([^"]*)"(?:\s+filePath="([^"]*)")?>([\s\S]*?)<\/boltAction>/gi;
-  
+  // Parse boltAction tags
+  const actionRegex = /<boltAction\s+type\s*=\s*"([^"]*)"(?:\s+filePath\s*=\s*"([^"]*)")?\s*>([\s\S]*?)<\/boltAction>/gi;
   let match;
   while ((match = actionRegex.exec(xmlContent)) !== null) {
-      const type = match[1]?.toLowerCase();
-      const filePath = match[2];
-      const content = match[3]?.trim() || '';
+    const type = match[1]?.toLowerCase();
+    const filePath = match[2];
+    const content = match[3]?.trim() || '';
 
-      if (!type) continue;
+    if (!type) {
+      console.warn('Skipping invalid boltAction with missing type:', match[0]);
+      continue;
+    }
 
-      if (type === 'file') {
-          steps.push({
-              id: stepId++,
-              title: `Create ${filePath || 'file'}`,
-              description: '',
-              type: StepType.CreateFile,
-              status: 'pending',
-              code: content,
-              path: filePath
-          });
-      } else if (type === 'shell') {
-          steps.push({
-              id: stepId++,
-              title: 'Run command',
-              description: '',
-              type: StepType.RunScript,
-              status: 'pending',
-              code: content
-          });
-      }
+    if (type === 'file') {
+      steps.push({
+        id: globalStepId++,
+        title: `Create ${filePath || 'file'}`,
+        description: '',
+        type: StepType.CreateFile,
+        status: 'pending',
+        code: content,
+        path: filePath || `/unnamed-${globalStepId}.txt`
+      });
+    } else if (type === 'shell') {
+      steps.push({
+        id: globalStepId++,
+        title: 'Run command',
+        description: '',
+        type: StepType.RunScript,
+        status: 'pending',
+        code: content
+      });
+    }
   }
 
+  // Fallback for non-XML or malformed responses
+  if (steps.length === 1 && !xmlContent.includes('<boltAction')) {
+    steps.push({
+      id: globalStepId++,
+      title: 'Generated Content',
+      description: 'Non-XML response captured',
+      type: StepType.CreateFile,
+      status: 'pending',
+      code: response,
+      path: '/generated.txt'
+    });
+  }
+
+  console.log('Parsed Steps:', steps);
   return steps;
 }
