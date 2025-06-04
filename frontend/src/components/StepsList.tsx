@@ -18,7 +18,7 @@ export const StepsList: React.FC<StepsListProps> = ({ steps, onStepClick }) => {
             className="flex items-start gap-3 cursor-pointer hover:bg-gray-700 p-2 rounded"
             onClick={() => onStepClick(step.id)}
           >
-            {step.completed ? (
+            {step.status=='completed' ? (
               <CheckCircle className="w-5 h-5 text-green-500 mt-1" />
             ) : (
               <Circle className="w-5 h-5 text-gray-400 mt-1" />

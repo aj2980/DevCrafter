@@ -1,136 +1,266 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import Editor from '@monaco-editor/react';
-import { FileExplorer } from '../components/FileExplorer';
 import { StepsList } from '../components/StepsList';
-import { FileNode, Step } from '../types';
+import { FileExplorer } from '../components/FileExplorer';
+import { TabView } from '../components/TabView';
+import { CodeEditor } from '../components/CodeEditor';
+import { PreviewFrame } from '../components/PreviewFrame';
+import { Step, FileItem, StepType } from '../types';
 import axios from 'axios';
 import { BACKEND_URL } from '../../Config';
 import { parseXml } from '../steps';
+import { useWebContainer } from '../hooks/useWebContainer';
+import { FileNode } from '@webcontainer/api';
+import { Loader } from '../components/Loader';
+
+const MOCK_FILE_CONTENT = `// This is a sample file content
+import React from 'react';
+
+function Component() {
+  return <div>Hello World</div>;
+}
+
+export default Component;`;
 
 export function Builder() {
   const location = useLocation();
   const { prompt } = location.state as { prompt: string };
-  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
-  const [selectedFileContent, setSelectedFileContent] = useState('');
-  const [files, setFiles] = useState<FileNode[]>([
-    {
-      name: 'src',
-      type: 'folder',
-      isOpen: true,
-      children: [
-        {
-          name: 'App.tsx',
-          type: 'file',
-          content: 'export default function App() {\n  return <div>Hello World</div>;\n}'
-        },
-        {
-          name: 'components',
-          type: 'folder',
-          isOpen: false,
-          children: []
-        }
-      ]
-    }
-  ]);
+  const [userPrompt, setPrompt] = useState("");
+  const [llmMessages, setLlmMessages] = useState<{role: "user" | "assistant", content: string;}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [templateSet, setTemplateSet] = useState(false);
+  const webcontainer = useWebContainer();
 
+  const [currentStep, setCurrentStep] = useState(1);
+  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  
   const [steps, setSteps] = useState<Step[]>([]);
 
-  const handleFileSelect = (content: string) => {
-    setSelectedFileContent(content);
-  };
+  const [files, setFiles] = useState<FileItem[]>([]);
+
+  useEffect(() => {
+    let originalFiles = [...files];
+    let updateHappened = false;
+    steps.filter(({status}) => status === "pending").map(step => {
+      updateHappened = true;
+      if (step?.type === StepType.CreateFile) {
+        let parsedPath = step.path?.split("/") ?? []; // ["src", "components", "App.tsx"]
+        let currentFileStructure = [...originalFiles]; // {}
+        let finalAnswerRef = currentFileStructure;
+  
+        let currentFolder = ""
+        while(parsedPath.length) {
+          currentFolder =  `${currentFolder}/${parsedPath[0]}`;
+          let currentFolderName = parsedPath[0];
+          parsedPath = parsedPath.slice(1);
+  
+          if (!parsedPath.length) {
+            // final file
+            let file = currentFileStructure.find(x => x.path === currentFolder)
+            if (!file) {
+              currentFileStructure.push({
+                name: currentFolderName,
+                type: 'file',
+                path: currentFolder,
+                content: step.code
+              })
+            } else {
+              file.content = step.code;
+            }
+          } else {
+            /// in a folder
+            let folder = currentFileStructure.find(x => x.path === currentFolder)
+            if (!folder) {
+              // create the folder
+              currentFileStructure.push({
+                name: currentFolderName,
+                type: 'folder',
+                path: currentFolder,
+                children: []
+              })
+            }
+  
+            currentFileStructure = currentFileStructure.find(x => x.path === currentFolder)!.children!;
+          }
+        }
+        originalFiles = finalAnswerRef;
+      }
+
+    })
+
+    if (updateHappened) {
+
+      setFiles(originalFiles)
+      setSteps(steps => steps.map((s: Step) => {
+        return {
+          ...s,
+          status: "completed"
+        }
+        
+      }))
+    }
+    console.log(files);
+  }, [steps, files]);
+
+  useEffect(() => {
+    const createMountStructure = (files: FileItem[]): Record<string, any> => {
+      const mountStructure: Record<string, any> = {};
+  
+      const processFile = (file: FileItem, isRootFolder: boolean) => {  
+        if (file.type === 'folder') {
+          // For folders, create a directory entry
+          mountStructure[file.name] = {
+            directory: file.children ? 
+              Object.fromEntries(
+                file.children.map(child => [child.name, processFile(child, false)])
+              ) 
+              : {}
+          };
+        } else if (file.type === 'file') {
+          if (isRootFolder) {
+            mountStructure[file.name] = {
+              file: {
+                contents: file.content || ''
+              }
+            };
+          } else {
+            // For files, create a file entry with contents
+            return {
+              file: {
+                contents: file.content || ''
+              }
+            };
+          }
+        }
+  
+        return mountStructure[file.name];
+      };
+  
+      // Process each top-level file/folder
+      files.forEach(file => processFile(file, true));
+  
+      return mountStructure;
+    };
+  
+    const mountStructure = createMountStructure(files);
+  
+    // Mount the structure if WebContainer is available
+    console.log(mountStructure);
+    webcontainer?.mount(mountStructure);
+  }, [files, webcontainer]);
 
   async function init() {
     const response = await axios.post(`${BACKEND_URL}/template`, {
       prompt: prompt.trim()
     });
-
-    const { prompts, uiPrompts } = response.data;
-
+    setTemplateSet(true);
+    
+    const {prompts, uiPrompts} = response.data;
 
     setSteps(parseXml(uiPrompts[0]).map((x: Step) => ({
       ...x,
       status: "pending"
     })));
 
-    await axios.post(`${BACKEND_URL}/chat`, {
+    setLoading(true);
+    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
       messages: [...prompts, prompt].map(content => ({
-        role: 'user',
+        role: "user",
         content
       }))
-    });
+    })
+
+    setLoading(false);
+
+    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
+      ...x,
+      status: "pending",
+    }))]);
+
+    setLlmMessages([...prompts, prompt].map(content => ({
+      role: "user",
+      content
+    })));
+
+    setLlmMessages(x => [...x, {role: "assistant", content: stepsResponse.data.response}])
   }
 
   useEffect(() => {
     init();
-  }, []);
+  }, [])
 
   return (
-    <div className="h-screen bg-gray-900 text-gray-200 flex">
-      {/* Sidebar - Steps List */}
-      <div className="w-1/4 border-r border-gray-700 p-4 overflow-auto bg-gray-800">
-        <h2 className="text-lg font-semibold mb-4">Steps</h2>
-        <StepsList steps={steps} onStepClick={() => {}} />
-      </div>
+    <div className="min-h-screen bg-gray-900 flex flex-col">
+      <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <h1 className="text-xl font-semibold text-gray-100">Website Builder</h1>
+        <p className="text-sm text-gray-400 mt-1">Prompt: {prompt}</p>
+      </header>
+      
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full grid grid-cols-4 gap-6 p-6">
+          <div className="col-span-1 space-y-6 overflow-auto">
+            <div>
+              <div className="max-h-[75vh] overflow-scroll">
+                <StepsList
+                  steps={steps}
+                  currentStep={currentStep}
+                  onStepClick={setCurrentStep}
+                />
+              </div>
+              <div>
+                <div className='flex'>
+                  <br />
+                  {(loading || !templateSet) && <Loader />}
+                  {!(loading || !templateSet) && <div className='flex'>
+                    <textarea value={userPrompt} onChange={(e) => {
+                    setPrompt(e.target.value)
+                  }} className='p-2 w-full'></textarea>
+                  <button onClick={async () => {
+                    const newMessage = {
+                      role: "user" as "user",
+                      content: userPrompt
+                    };
 
-      {/* Sidebar - File Explorer */}
-      <div className="w-1/4 border-r border-gray-700 p-4 overflow-auto bg-gray-800">
-        <h2 className="text-lg font-semibold mb-4">File Explorer</h2>
-        <FileExplorer files={files} onFileSelect={handleFileSelect} />
-      </div>
+                    setLoading(true);
+                    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
+                      messages: [...llmMessages, newMessage]
+                    });
+                    setLoading(false);
 
-      {/* Main Content - Editor & Preview */}
-      <div className="w-1/2 flex flex-col bg-gray-900">
-        {/* Tab Buttons */}
-        <div className="flex border-b border-gray-700 bg-gray-800 text-gray-300">
-          <button
-            className={`px-6 py-2 transition-all ${activeTab === 'code' ? 'bg-gray-700 text-white font-bold' : 'hover:bg-gray-700'}`}
-            onClick={() => setActiveTab('code')}
-          >
-            Code
-          </button>
-          <button
-            className={`px-6 py-2 transition-all ${activeTab === 'preview' ? 'bg-gray-700 text-white font-bold' : 'hover:bg-gray-700'}`}
-            onClick={() => setActiveTab('preview')}
-          >
-            Preview
-          </button>
-        </div>
+                    setLlmMessages(x => [...x, newMessage]);
+                    setLlmMessages(x => [...x, {
+                      role: "assistant",
+                      content: stepsResponse.data.response
+                    }]);
+                    
+                    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
+                      ...x,
+                      status: "pending"
+                    }))]);
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-auto p-4">
-          {activeTab === 'code' ? (
-            <Editor
-              height="100%"
-              defaultLanguage="typescript"
-              theme="vs-dark"
-              value={selectedFileContent}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                readOnly: true
-              }}
-              className="rounded-lg shadow-lg"
-            />
-          ) : (
-            <div className="h-full w-full bg-white p-4 rounded-lg shadow-lg overflow-auto">
-              <iframe
-                title="preview"
-                className="w-full h-full border rounded-lg"
-                srcDoc={`
-                  <!DOCTYPE html>
-                  <html>
-                    <body>
-                      <div id="root"></div>
-                      <script type="module">
-                        ${selectedFileContent}
-                      </script>
-                    </body>
-                  </html>
-                `}
+                  }} className='bg-purple-400 px-4'>Send</button>
+                  </div>}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="col-span-1">
+              <FileExplorer 
+                files={files} 
+                onFileSelect={setSelectedFile}
               />
             </div>
-          )}
+          <div className="col-span-2 bg-gray-900 rounded-lg shadow-lg p-4 h-[calc(100vh-8rem)]">
+            <TabView activeTab={activeTab} onTabChange={setActiveTab} />
+            <div className="h-[calc(100%-4rem)]">
+              {activeTab === 'code' ? (
+                <CodeEditor file={selectedFile} />
+              ) : (
+                <PreviewFrame webContainer={webcontainer} files={files} />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

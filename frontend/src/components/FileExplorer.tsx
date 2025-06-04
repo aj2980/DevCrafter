@@ -1,73 +1,85 @@
-import React from 'react';
-import { ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react';
-import { FileNode } from '../types';
+import { useState } from 'react';
+import { FolderTree, File, ChevronRight, ChevronDown } from 'lucide-react';
+import { FileItem } from '../types';
 
 interface FileExplorerProps {
-  files: FileNode[];
-  onFileSelect: (content: string) => void;
-  onToggleFolder: (path: string[]) => void;
+  files: FileItem[];
+  onFileSelect: (file: FileItem) => void;
 }
 
-const FileExplorerItem: React.FC<{
-  node: FileNode;
-  path: string[];
-  onFileSelect: (content: string) => void;
-  onToggleFolder: (path: string[]) => void;
-}> = ({ node, path, onFileSelect, onToggleFolder }) => {
-  const isFolder = node.type === 'folder';
-  const currentPath = [...path, node.name];
+interface FileNodeProps {
+  item: FileItem;
+  depth: number;
+  onFileClick: (file: FileItem) => void;
+}
+
+function FileNode({ item, depth, onFileClick }: FileNodeProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const handleClick = () => {
+    if (item.type === 'folder') {
+      setIsExpanded(!isExpanded);
+    } else {
+      onFileClick(item);
+    }
+  };
 
   return (
     <div className="select-none">
       <div
-        className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
-        onClick={() => {
-          if (isFolder) {
-            onToggleFolder(currentPath);
-          } else if (node.content) {
-            onFileSelect(node.content);
-          }
-        }}
+        className="flex items-center gap-2 p-2 hover:bg-gray-800 rounded-md cursor-pointer"
+        style={{ paddingLeft: `${depth * 1.5}rem` }}
+        onClick={handleClick}
       >
-        <span className="w-4">
-          {isFolder && (node.isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />)}
-        </span>
-        {isFolder ? <Folder size={16} /> : <FileText size={16} />}
-        <span className="text-sm">{node.name}</span>
+        {item.type === 'folder' && (
+          <span className="text-gray-400">
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </span>
+        )}
+        {item.type === 'folder' ? (
+          <FolderTree className="w-4 h-4 text-blue-400" />
+        ) : (
+          <File className="w-4 h-4 text-gray-400" />
+        )}
+        <span className="text-gray-200">{item.name}</span>
       </div>
-      {isFolder && node.isOpen && node.children && (
-        <div className="ml-4">
-          {node.children.map((child, index) => (
-            <FileExplorerItem
-              key={index}
-              node={child}
-              path={currentPath}
-              onFileSelect={onFileSelect}
-              onToggleFolder={onToggleFolder}
+      {item.type === 'folder' && isExpanded && item.children && (
+        <div>
+          {item.children.map((child, index) => (
+            <FileNode
+              key={`${child.path}-${index}`}
+              item={child}
+              depth={depth + 1}
+              onFileClick={onFileClick}
             />
           ))}
         </div>
       )}
     </div>
   );
-};
+}
 
-export const FileExplorer: React.FC<FileExplorerProps> = ({
-  files,
-  onFileSelect,
-  onToggleFolder,
-}) => {
+export function FileExplorer({ files, onFileSelect }: FileExplorerProps) {
   return (
-    <div className="h-full bg-gray-800 text-gray-200 overflow-y-auto">
-      {files.map((file, index) => (
-        <FileExplorerItem
-          key={index}
-          node={file}
-          path={[]}
-          onFileSelect={onFileSelect}
-          onToggleFolder={onToggleFolder}
-        />
-      ))}
+    <div className="bg-gray-900 rounded-lg shadow-lg p-4 h-full overflow-auto">
+      <h2 className="text-lg font-semibold mb-4 flex items-center gap-2 text-gray-100">
+        <FolderTree className="w-5 h-5" />
+        File Explorer
+      </h2>
+      <div className="space-y-1">
+        {files.map((file, index) => (
+          <FileNode
+            key={`${file.path}-${index}`}
+            item={file}
+            depth={0}
+            onFileClick={onFileSelect}
+          />
+        ))}
+      </div>
     </div>
   );
-};
+}

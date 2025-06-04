@@ -2,6 +2,11 @@ import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { Builder } from './pages/Builder';
+import { Navbar } from './Navbar';
+import { Tutorial } from "./pages/Tutorial";
+import { About } from "./pages/About";
+import { Faq} from "./pages/Faq";
+
 // import { parseXml } from './steps';
 function App() {
   // const x=parseXml(
@@ -13,9 +18,14 @@ function App() {
   // console.log(x);
   return (
     <BrowserRouter>
+    <Navbar />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/builder" element={<Builder />} />
+        <Route path="/tutorial" element={<Tutorial />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/faqs" element={<Faq />} />
+
       </Routes>
     </BrowserRouter>
   );
