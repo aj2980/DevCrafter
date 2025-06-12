@@ -12,6 +12,8 @@ import { parseXml } from '../steps';
 import { useWebContainer } from '../hooks/useWebContainer';
 import { Loader } from '../components/Loader';
 
+import { motion, AnimatePresence } from 'framer-motion';
+
 export function Builder() {
   const location = useLocation();
   const { prompt } = location.state as { prompt: string };
@@ -93,22 +95,24 @@ export function Builder() {
       });
 
     if (updateHappened) {
-      console.log('Updated Files:', updatedFiles);
+      console.log('Updated Files:', JSON.stringify(updatedFiles, null, 2));
       setFiles(updatedFiles);
+      console.log('New files state:', JSON.stringify(updatedFiles, null, 2));
       setSteps(steps.map(s => executedScripts.has(s.id) || s.type === StepType.CreateFile ? { ...s, status: 'completed' } : s));
     }
   }, [steps, files, webcontainer]);
 
   useEffect(() => {
-    if (files.length > 0) {
+    if (files.length > 0 && !selectedFile) {
       const appFile = files
         .flatMap(f => f.type === 'folder' && f.children ? f.children : f)
         .find(f => f.type === 'file' && f.path === 'src/App.tsx');
-      if (appFile && (!selectedFile || selectedFile.path !== appFile.path)) {
-        console.log('Selecting updated src/App.tsx');
+      if (appFile) {
+        console.log('Selecting initial src/App.tsx');
         setSelectedFile(appFile);
-      } else if (!selectedFile) {
+      } else {
         const firstFile = files.find(f => f.type === 'file') || files[0];
+        console.log('Selecting initial file:', firstFile);
         setSelectedFile(firstFile);
       }
     }
@@ -148,9 +152,21 @@ export function Builder() {
       return mountStructure;
     };
 
-    const mountStructure = createMountStructure(files);
-    console.log('Mount Structure:', mountStructure);
-    webcontainer.mount(mountStructure);
+    const timer = setTimeout(() => {
+      // Check for main.tsx
+      const mainFile = files.find(f => f.path === 'src/main.tsx');
+      if (!mainFile) {
+        console.warn('main.tsx not found in files:', JSON.stringify(files.map(f => f.path), null, 2));
+      } else {
+        console.log('main.tsx found with content:', mainFile.content);
+      }
+
+      const mountStructure = createMountStructure(files);
+      console.log('Mount Structure:', JSON.stringify(mountStructure, null, 2));
+      webcontainer.mount(mountStructure);
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [files, webcontainer]);
 
   async function init() {
